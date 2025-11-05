@@ -2,42 +2,97 @@ import shlex
 import asyncio
 import uuid
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import HTML
+
 from world import WorldManager
 
 
+class AgentCompleter(Completer):
+    def __init__(self, wm: WorldManager):
+        self.wm = wm
+        self.commands = ['list', 'start', 'send', 'stop', 'quit', 'exit', 'help']
+
+    def get_completions(self, document: Document, _):
+        text = document.text_before_cursor
+        words = text.split()
+
+        # If we're at the start or completing the first word, suggest commands
+        if len(words) == 0 or (len(words) == 1 and not text.endswith(' ')):
+            word = words[0] if words else ''
+            for cmd in self.commands:
+                if cmd.startswith(word.lower()):
+                    yield Completion(cmd, start_position=-len(word))
+
+        # If we typed "send " or "stop ", suggest agent IDs
+        elif len(words) >= 1 and words[0] in ('send', 'stop'):
+            if len(words) == 1 or (len(words) == 2 and not text.endswith(' ')):
+                # We're completing the agent ID
+                current_word = words[1] if len(words) == 2 else ''
+                agents = self.wm.list_agents()
+                for agent_id, agent_name in agents:
+                    agent_id_str = str(agent_id)
+                    if agent_id_str.startswith(current_word):
+                        # Show agent name as metadata for easier identification
+                        yield Completion(
+                            agent_id_str,
+                            start_position=-len(current_word),
+                            display_meta=agent_name
+                        )
+
+
+def print_help():
+    print("\nAvailable commands:")
+    print("  list                          - List all running agents")
+    print("  start <name> <model> <prompt> - Start new agent with name, model, and prompt")
+    print("  send <id> <message>           - Send a message to an agent based on id")
+    print("  stop <id>                     - Stop agent")
+    print("  help                          - Show this help message")
+    print("  quit/exit                     - Quit")
+    print()
+
+
 async def interactive_mode(wm: WorldManager):
+    # Create a custom completer that knows about commands and agent IDs
+    completer = AgentCompleter(wm)
+
+    # Create a prompt session
+    session = PromptSession(
+        message=HTML('<b>&gt;</b> '),
+        completer=completer,
+    )
+
     print("\n" + "=" * 60)
     print("INTERACTIVE MODE")
     print("=" * 60)
-    print("\nAvailable commands:")
-    print("  list                          - List all running agents")
-    print(
-        "  start <name> <model> <prompt> - Start new agent with name, model, and prompt"
-    )
-    print("  send <id> <message>           - Send a message to an agent based on id")
-    print("  stop <id>                     - Stop agent")
-    print("  quit                          - Quit")
+    print_help()
+    print("Press Tab for command completion, Ctrl+C to cancel input")
     print()
 
     while True:
         try:
-            # Use asyncio to allow other tasks to run while waiting for input
-            loop = asyncio.get_event_loop()
-            cmd = await loop.run_in_executor(None, input, "> ")
+            # Get input using prompt_toolkit (async-friendly)
+            cmd = await session.prompt_async()
             cmd = cmd.strip()
 
             if not cmd:
                 continue
 
-            elif cmd == "quit":
+            elif cmd in ("quit", "exit"):
                 break
 
-            elif cmd == "exit":
-                break
+            elif cmd == "help":
+                print_help()
 
             elif cmd == "list":
-                for agent in wm.list_agents():
-                    print(f"{agent[0]} ({agent[1]})")
+                agents = wm.list_agents()
+                if not agents:
+                    print("No agents running.")
+                else:
+                    for agent in agents:
+                        print(f"  {agent[0]} ({agent[1]})")
 
             elif cmd.startswith("start "):
                 parts = cmd.split(" ", 1)[1]
@@ -48,17 +103,14 @@ async def interactive_mode(wm: WorldManager):
                         model = args[1]
                         prompt = args[2]
                         agent_id = wm.start_agent(name, model, prompt)
+                        print(f"Started agent: {name} (ID: {agent_id})")
                     else:
                         print("Usage: start <name> <model> <prompt>")
-                        print(
-                            "Example: start 'Travel Agent' gpt-4o-mini 'You help people book travel'"
-                        )
+                        print("Example: start 'Travel Agent' gpt-4o-mini 'You help people book travel'")
                 except ValueError as e:
                     print(f"Error parsing command: {e}")
                     print("Usage: start <name> <model> <prompt>")
-                    print(
-                        "Example: start 'Travel Agent' gpt-4o-mini 'You help people book travel'"
-                    )
+                    print("Example: start 'Travel Agent' gpt-4o-mini 'You help people book travel'")
 
             elif cmd.startswith("send "):
                 parts = cmd.split(" ", 1)[1]
@@ -68,26 +120,33 @@ async def interactive_mode(wm: WorldManager):
                         agent_id = uuid.UUID(args[0])
                         message = args[1]
                         wm.send_message_to_agent(agent_id, message)
+                        print(f"Message sent to agent {agent_id}")
                     else:
                         print("Usage: send <id> <message>")
-                        print(
-                            "Example: send 12345678-1234-5678-1234-567812345678 'Hello agent'"
-                        )
+                        print("Example: send 12345678-1234-5678-1234-567812345678 'Hello agent'")
                 except ValueError as e:
                     print(f"Error parsing command: {e}")
                     print("Usage: send <id> <message>")
-                    print(
-                        "Example: send 12345678-1234-5678-1234-567812345678 'Hello agent'"
-                    )
+                    print("Example: send 12345678-1234-5678-1234-567812345678 'Hello agent'")
 
             elif cmd.startswith("stop "):
-                id = cmd.split(" ", 1)[1]
-                wm.stop_agent(uuid.UUID(id))
+                id_str = cmd.split(" ", 1)[1]
+                try:
+                    agent_id = uuid.UUID(id_str)
+                    wm.stop_agent(agent_id)
+                    print(f"Stopped agent {agent_id}")
+                except ValueError as e:
+                    print(f"Error: Invalid UUID format: {e}")
 
             else:
-                print("Unknown command. Type 'quit' to leave interactive mode.")
+                print(f"Unknown command: '{cmd}'. Type 'help' for available commands.")
 
         except KeyboardInterrupt:
+            # Ctrl+C cancels current input but doesn't exit
+            print("\n(Press Ctrl+D or type 'quit' to exit)")
+            continue
+        except EOFError:
+            # Ctrl+D exits
             break
         except Exception as e:
             print(f"Error: {e}")
