@@ -3,8 +3,9 @@ import os
 import sys
 
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 from multiprocessing import Queue
-from typing import Dict, Any
+from typing import Dict, Any, List
 from loguru import logger
 
 
@@ -39,20 +40,18 @@ async def _agent(
         "status": "ready",
     }
 
-    conversation_history = []
+    conversation_history: List[ChatCompletionMessageParam] = []
 
     async def invoke_llm(user_message: str):
         try:
-            messages = (
-                [
-                    {
-                        "role": "system",
-                        "content": system_prompt or "You are a helpful assistant.",
-                    }
-                ]
-                + conversation_history
-                + [{"role": "user", "content": user_message}]
-            )
+            messages: List[ChatCompletionMessageParam] = [
+                {
+                    "role": "system",
+                    "content": system_prompt or "You are a helpful assistant.",
+                }
+            ]
+            messages.extend(conversation_history)
+            messages.append({"role": "user", "content": user_message})
 
             agent_logger.info("Invoking LLM")
             response = await client.chat.completions.create(
