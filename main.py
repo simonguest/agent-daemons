@@ -13,7 +13,7 @@ from world import WorldManager
 class AgentCompleter(Completer):
     def __init__(self, wm: WorldManager):
         self.wm = wm
-        self.commands = ['list', 'start', 'send', 'stop', 'quit', 'exit', 'help']
+        self.commands = ['list', 'spawn', 'send', 'kill', 'quit', 'exit', 'help']
 
     def get_completions(self, document: Document, _):
         text = document.text_before_cursor
@@ -26,8 +26,8 @@ class AgentCompleter(Completer):
                 if cmd.startswith(word.lower()):
                     yield Completion(cmd, start_position=-len(word))
 
-        # If we typed "send " or "stop ", suggest agent IDs
-        elif len(words) >= 1 and words[0] in ('send', 'stop'):
+        # If we typed "send " or "kill ", suggest agent IDs
+        elif len(words) >= 1 and words[0] in ('send', 'kill'):
             if len(words) == 1 or (len(words) == 2 and not text.endswith(' ')):
                 # We're completing the agent ID
                 current_word = words[1] if len(words) == 2 else ''
@@ -46,9 +46,9 @@ class AgentCompleter(Completer):
 def print_help():
     print("\nAvailable commands:")
     print("  list                          - List all running agents")
-    print("  start <name> <model> <prompt> - Start new agent with name, model, and prompt")
+    print("  spawn <name> <model> <prompt> - Spawn new agent with name, model, and prompt")
     print("  send <id> <message>           - Send a message to an agent based on id")
-    print("  stop <id>                     - Stop agent")
+    print("  kill <id>                     - Kill agent")
     print("  help                          - Show this help message")
     print("  quit/exit                     - Quit")
     print()
@@ -94,7 +94,7 @@ async def interactive_mode(wm: WorldManager):
                     for agent in agents:
                         print(f"  {agent[0]} ({agent[1]})")
 
-            elif cmd.startswith("start "):
+            elif cmd.startswith("spawn "):
                 parts = cmd.split(" ", 1)[1]
                 try:
                     args = shlex.split(parts)
@@ -102,15 +102,15 @@ async def interactive_mode(wm: WorldManager):
                         name = args[0]
                         model = args[1]
                         prompt = args[2]
-                        agent_id = wm.start_agent(name, model, prompt)
-                        print(f"Started agent: {name} (ID: {agent_id})")
+                        agent_id = wm.spawn_agent(name, model, prompt)
+                        print(f"Spawned agent: {name} (ID: {agent_id})")
                     else:
-                        print("Usage: start <name> <model> <prompt>")
-                        print("Example: start 'Travel Agent' gpt-4o-mini 'You help people book travel'")
+                        print("Usage: spawn <name> <model> <prompt>")
+                        print("Example: spawn 'Travel Agent' gpt-4o-mini 'You help people book travel'")
                 except ValueError as e:
                     print(f"Error parsing command: {e}")
-                    print("Usage: start <name> <model> <prompt>")
-                    print("Example: start 'Travel Agent' gpt-4o-mini 'You help people book travel'")
+                    print("Usage: spawn <name> <model> <prompt>")
+                    print("Example: spawn 'Travel Agent' gpt-4o-mini 'You help people book travel'")
 
             elif cmd.startswith("send "):
                 parts = cmd.split(" ", 1)[1]
@@ -129,12 +129,12 @@ async def interactive_mode(wm: WorldManager):
                     print("Usage: send <id> <message>")
                     print("Example: send 12345678-1234-5678-1234-567812345678 'Hello agent'")
 
-            elif cmd.startswith("stop "):
+            elif cmd.startswith("kill "):
                 id_str = cmd.split(" ", 1)[1]
                 try:
                     agent_id = uuid.UUID(id_str)
-                    wm.stop_agent(agent_id)
-                    print(f"Stopped agent {agent_id}")
+                    wm.kill_agent(agent_id)
+                    print(f"Killed agent {agent_id}")
                 except ValueError as e:
                     print(f"Error: Invalid UUID format: {e}")
 
@@ -155,7 +155,7 @@ async def interactive_mode(wm: WorldManager):
 async def main():
     # Create a new instance of the world manager
     wm = WorldManager()
-    wm.start_agent("My first agent", "gpt-4o-mini", "You are a helpful assistant")
+    wm.spawn_agent("My first agent", "gpt-4o-mini", "You are a helpful assistant")
 
     # Start listening for any messages sent from agents
     wm.start_user_queue_monitor()

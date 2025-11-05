@@ -55,7 +55,7 @@ class WorldManager:
         # Return False to propagate any exceptions that occurred
         return False
 
-    def start_agent(self, name: str, model: str, system_prompt: str):
+    def spawn_agent(self, name: str, model: str, system_prompt: str):
         id = uuid.uuid4()
         inbox = self.manager.Queue()
 
@@ -108,12 +108,12 @@ class WorldManager:
         asyncio.get_running_loop()
         asyncio.create_task(self.monitor_user_queue())
 
-    def stop_agent(self, id: uuid.UUID) -> None:
+    def kill_agent(self, id: uuid.UUID) -> None:
         # Remove from registry
         self.world_logger.info(f"Removing agent {id} from registry")
         del self.registry[id]
-        
-        self.world_logger.info(f"Stopping agent process for {id}")
+
+        self.world_logger.info(f"Killing agent process for {id}")
         for i, a in enumerate(self.agent_processes):
             if a["id"] == id:
                 process = a["process"]
@@ -130,10 +130,10 @@ class WorldManager:
     def shutdown(self):
         self.world_logger.info("Shutting down world")
 
-        # Stop all agent processes using stop_agent
+        # Kill all agent processes using kill_agent
         agent_ids = [a["id"] for a in self.agent_processes.copy()]
         for agent_id in agent_ids:
-            self.stop_agent(agent_id)
+            self.kill_agent(agent_id)
 
         # Stop the message router process
         if self.router_process.is_alive():
