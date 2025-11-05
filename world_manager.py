@@ -1,8 +1,11 @@
-from multiprocessing import Process, Manager
-from typing import List, Tuple
 import uuid
 import time
 import asyncio
+import sys
+
+from multiprocessing import Process, Manager
+from typing import List, Tuple
+from loguru import logger
 
 from agents import agent
 from message_router import MessageRouter
@@ -14,9 +17,19 @@ def _run_message_router(registry, router_queue, agent_queues, user_queue):
 
 
 class WorldManager:
-    agents = []
+    agent_processes = []
 
     def __init__(self):
+        logger.remove()
+        logger.add(
+            sys.stdout,
+            colorize=True,
+            format="<yellow>World</yellow> | <level>{message}</level>",
+            filter=lambda record: record["extra"].get("name") == "world",
+        )
+        self.world_logger = logger.bind(name="world")
+        self.world_logger.info("Launching new world")
+
         self.manager = Manager()
         self.registry = self.manager.dict()
         self.msg_router_queue = self.manager.Queue()
@@ -57,44 +70,48 @@ class WorldManager:
         )
         p.start()
 
-        self.agents.append({"id": id, "name": name, "process": p, "inbox": inbox})
+        self.agent_processes.append({"id": id, "process": p})
 
         # Give process time to initialize and return id to caller
         time.sleep(2)
         return id
 
     def list_agents(self) -> List[Tuple]:
-        print(self.registry)
-        return [(agent["id"], agent["name"]) for agent in self.agents]
+        return [(agent_id, agent_info['name']) for agent_id, agent_info in self.registry.items()]
+
 
     def send_message_to_agent(self, id: uuid.UUID, message: str) -> None:
         new_message = {"from": "user", "to": id, "type": "chat", "content": message}
         self.msg_router_queue.put(new_message)
 
     async def monitor_user_queue(self) -> None:
-        """Monitor the user_queue and print any messages received"""
-        print("[WorldManager] Starting user queue monitor...")
+        logger.add(
+            sys.stdout,
+            colorize=True,
+            format="<green>User</green> | <level>{message}</level>",
+            filter=lambda record: record["extra"].get("name") == "user",
+        )
+        user_logger = logger.bind(name="user")
         while True:
             if not self.user_queue.empty():
                 message = self.user_queue.get()
                 content = message.get("content", "")
                 sender = message.get("from", "unknown")
-                print(f"\n[Message from {sender}]: {content}\n")
+                user_logger.info(f"Message from {sender}: {content}")
             await asyncio.sleep(0.01)
 
     def start_user_queue_monitor(self) -> None:
-        """Start monitoring the user queue in a background asyncio task"""
-        try:
-            asyncio.get_running_loop()
-            asyncio.create_task(self.monitor_user_queue())
-        except RuntimeError:
-            # No event loop running, need to create one
-            print(
-                "[WorldManager] Warning: No asyncio event loop running. Call monitor_user_queue() from an async context."
-            )
+        self.world_logger.info("Starting user queue monitor")
+        asyncio.get_running_loop()
+        asyncio.create_task(self.monitor_user_queue())
 
     def stop_agent(self, id: uuid.UUID) -> None:
-        for i, a in enumerate(self.agents):
+        # Remove from registry
+        self.world_logger.info(f"Removing agent {id} from registry")
+        del self.registry[id]
+        
+        self.world_logger.info(f"Stopping agent process for {id}")
+        for i, a in enumerate(self.agent_processes):
             if a["id"] == id:
                 process = a["process"]
                 if process.is_alive():
@@ -102,10 +119,26 @@ class WorldManager:
                     process.join(timeout=5)
                     if process.is_alive():
                         process.kill()
-                del self.agents[i]
+                del self.agent_processes[i]
                 if id in self.agent_queues:
                     del self.agent_queues[id]
                 break
 
     def shutdown(self):
-        print("Shutting down world")
+        self.world_logger.info("Shutting down world")
+
+        # Stop all agent processes using stop_agent
+        agent_ids = [a["id"] for a in self.agent_processes.copy()]
+        for agent_id in agent_ids:
+            self.stop_agent(agent_id)
+
+        # Stop the message router process
+        if self.router_process.is_alive():
+            self.world_logger.info("Stopping message router process")
+            self.router_process.terminate()
+            self.router_process.join(timeout=5)
+            if self.router_process.is_alive():
+                self.world_logger.warning("Router process did not terminate, forcing kill")
+                self.router_process.kill()
+
+        self.world_logger.info("World shutdown complete")

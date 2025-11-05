@@ -5,6 +5,7 @@ description = "Agent Daemons"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "loguru>=0.7.3",
     "openai>=2.6.1",
 ]
 

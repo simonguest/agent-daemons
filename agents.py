@@ -1,12 +1,15 @@
 import asyncio
-from openai import AsyncOpenAI
 import os
+import sys
+
+from openai import AsyncOpenAI
 from multiprocessing import Queue
 from typing import Dict, Any
+from loguru import logger
 
 
 async def _agent(
-    worker_id: str,
+    id: str,
     inbox: Queue,
     router_queue: Queue,
     agent_registry: Dict,
@@ -14,11 +17,21 @@ async def _agent(
     model: str = "gpt-4o-mini",
     system_prompt: str = "You are a helpful assistant.",
 ):
-    # Initialize OpenAI client (requires OPENAI_API_KEY env var)
-    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "your-api-key-here"))
+    # Initialize logging client
+    logger.remove()
+    logger.add(
+        sys.stdout,
+        colorize=True,
+        format="<blue>Agent {extra[id]}</blue> | <level>{message}</level>",
+    )
+    agent_logger = logger.bind(id=id)
+    agent_logger.info(f"Starting up with model: {model}")
+
+    # Initialize OpenAI client
+    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 
     # Register this agent with its capabilities
-    agent_registry[worker_id] = {
+    agent_registry[id] = {
         "type": "agent",
         "model": model,
         "name": name,
@@ -26,13 +39,9 @@ async def _agent(
         "status": "ready",
     }
 
-    print(f"[{worker_id}] Started with model {model}")
-
-    # Conversation history for this worker
     conversation_history = []
 
-    async def call_llm(user_message: str):
-        """Make an async call to OpenAI API"""
+    async def invoke_llm(user_message: str):
         try:
             messages = (
                 [
@@ -45,7 +54,7 @@ async def _agent(
                 + [{"role": "user", "content": user_message}]
             )
 
-            print(f"[{worker_id}] Calling OpenAI API...")
+            agent_logger.info("Invoking LLM")
             response = await client.chat.completions.create(
                 model=model, messages=messages, temperature=0.7, max_tokens=500
             )
@@ -64,29 +73,25 @@ async def _agent(
             return result
 
         except Exception as e:
+            agent_logger.error({str(e)})
             return f"Error calling LLM: {str(e)}"
 
-    async def handle_message(msg: Dict[str, Any]):
-        print("Message received. Invoking the LLM.")
-        print(msg)
-        response = await call_llm(msg["content"])
-        print(response)
-        print("Returning response to the sender")
+    async def handle_message(message: Dict[str, Any]):
+        agent_logger.info(f"Message received from {message['from']}")
+        response = await invoke_llm(message["content"])
+        agent_logger.info(f"Returning response to {message['from']}")
         message = {
-            "from": worker_id,
-            "to": msg["from"],
+            "from": id,
+            "to": message["from"],
             "type": "chat",
             "content": response,
         }
         router_queue.put(message)
 
-    print(f"[{worker_id}] Entering main loop...")
-
+    agent_logger.info("Entering main loop")
     while True:
-        # Check for incoming messages (non-blocking)
         if not inbox.empty():
             msg = inbox.get()
-            # Create task to handle message asynchronously
             asyncio.create_task(handle_message(msg))
 
         # Small sleep to prevent tight loop
@@ -94,7 +99,7 @@ async def _agent(
 
 
 def agent(
-    worker_id: str,
+    id: str,
     inbox: Queue,
     router_queue: Queue,
     registry: Dict,
@@ -102,7 +107,4 @@ def agent(
     model: str,
     system_prompt: str,
 ):
-    """Wrapper to run async worker in a process"""
-    asyncio.run(
-        _agent(worker_id, inbox, router_queue, registry, name, model, system_prompt)
-    )
+    asyncio.run(_agent(id, inbox, router_queue, registry, name, model, system_prompt))

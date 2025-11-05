@@ -48,7 +48,6 @@ async def interactive_mode(wm: WorldManager):
                         model = args[1]
                         prompt = args[2]
                         agent_id = wm.start_agent(name, model, prompt)
-                        print(f"Agent started with id {agent_id}")
                     else:
                         print("Usage: start <name> <model> <prompt>")
                         print(
@@ -69,7 +68,6 @@ async def interactive_mode(wm: WorldManager):
                         agent_id = uuid.UUID(args[0])
                         message = args[1]
                         wm.send_message_to_agent(agent_id, message)
-                        print(f"Message sent to agent {agent_id}")
                     else:
                         print("Usage: send <id> <message>")
                         print(
@@ -84,7 +82,6 @@ async def interactive_mode(wm: WorldManager):
 
             elif cmd.startswith("stop "):
                 id = cmd.split(" ", 1)[1]
-                print(f"Sending stop signal to agent {id}")
                 wm.stop_agent(uuid.UUID(id))
 
             else:
@@ -99,10 +96,9 @@ async def interactive_mode(wm: WorldManager):
 async def main():
     # Create a new instance of the world manager
     wm = WorldManager()
-    agent_id = wm.start_agent(
+    wm.start_agent(
         "My first agent", "gpt-4o-mini", "You are a helpful assistant"
     )
-    print(f"Agent started with id {agent_id}")
 
     # Start listening for any messages sent from agents
     wm.start_user_queue_monitor()
