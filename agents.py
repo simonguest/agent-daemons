@@ -4,9 +4,9 @@ import sys
 import json
 
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionMessageToolCall
 from multiprocessing import Queue
-from typing import Dict, Any, List
+from typing import Dict, Any, List, cast
 from loguru import logger
 
 from tooling import tools, available_functions
@@ -66,37 +66,45 @@ async def _agent(
             # Check to see if a tool call is needed
             tool_calls = response_message.tool_calls
             if tool_calls:
-                conversation_history.append(response_message.model_dump()) 
+                # Append user message and assistant response with tool calls
+                conversation_history.append({"role": "user", "content": user_message})
+                conversation_history.append(cast(ChatCompletionMessageParam, response_message.model_dump()))
 
                 for tool_call in tool_calls:
-                    agent_logger.info(f"Calling tool: {tool_call.function.name}")
-                    function_name = tool_call.function.name
+                    # Cast to proper tool call type to access function attribute
+                    typed_tool_call = cast(ChatCompletionMessageToolCall, tool_call)
+                    agent_logger.info(f"Calling tool: {typed_tool_call.function.name}")
+                    function_name = typed_tool_call.function.name
                     function_to_call = available_functions[function_name]
-                    function_args = json.loads(tool_call.function.arguments)
-                    
+                    function_args = json.loads(typed_tool_call.function.arguments)
+
                     function_response = function_to_call(
                         location=function_args.get("location"),
                         unit=function_args.get("unit", "fahrenheit"),
                     )
 
-                    conversation_history.append({
-                        "tool_call_id": tool_call.id,
-                        "role": "tool",
-                        "name": function_name,
-                        "content": function_response,
-                    })
+                    conversation_history.append(
+                        cast(
+                            ChatCompletionMessageParam,
+                            {
+                                "tool_call_id": typed_tool_call.id,
+                                "role": "tool",
+                                "name": function_name,
+                                "content": function_response,
+                            },
+                        )
+                    )
 
                     # Invoke to pass the control back to the LLM
                     agent_logger.info("Invoking LLM")
                     response = await client.chat.completions.create(
                         model=model, messages=conversation_history
                     )
-                    
+
                     content = response.choices[0].message.content
-                    conversation_history.append({"role": "user", "content": user_message})
                     conversation_history.append({"role": "assistant", "content": content})
                     return content
-            else:            
+            else:
                 content = response_message.content
                 conversation_history.append({"role": "user", "content": user_message})
                 conversation_history.append({"role": "assistant", "content": content})
