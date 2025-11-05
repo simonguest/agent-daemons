@@ -30,7 +30,7 @@ class MessageRouter:
         self.global_queue.put(message)
 
     async def _route_message(self, message):
-        self.router_logger.info(f"Routing message from {message["from"]} to {message["to"]}")
+        self.router_logger.info(f"Routing message from {message.get("from", "unknown")} to {message.get("to", "unknown")}")
         target = message.get("to")
 
         if target:

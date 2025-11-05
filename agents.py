@@ -72,7 +72,7 @@ async def _agent(
             return result
 
         except Exception as e:
-            agent_logger.error({str(e)})
+            agent_logger.error(f"Error: {e}")
             return f"Error calling LLM: {str(e)}"
 
     async def handle_message(message: Dict[str, Any]):

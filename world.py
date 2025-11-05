@@ -1,5 +1,4 @@
 import uuid
-import time
 import asyncio
 import sys
 
@@ -8,7 +7,7 @@ from typing import List, Tuple
 from loguru import logger
 
 from agents import agent
-from message_router import MessageRouter
+from router import MessageRouter
 
 
 def _run_message_router(registry, router_queue, agent_queues, user_queue):
@@ -17,8 +16,6 @@ def _run_message_router(registry, router_queue, agent_queues, user_queue):
 
 
 class WorldManager:
-    agent_processes = []
-
     def __init__(self):
         logger.remove()
         logger.add(
@@ -35,6 +32,7 @@ class WorldManager:
         self.msg_router_queue = self.manager.Queue()
         self.agent_queues = self.manager.dict()
         self.user_queue = self.manager.Queue()  # Queue for user messages
+        self.agent_processes = []  # Instance variable, not class variable
 
         # Start message router in separate process
         self.router_process = Process(
@@ -48,6 +46,14 @@ class WorldManager:
             daemon=True,
         )
         self.router_process.start()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.shutdown()
+        # Return False to propagate any exceptions that occurred
+        return False
 
     def start_agent(self, name: str, model: str, system_prompt: str):
         id = uuid.uuid4()
@@ -71,12 +77,9 @@ class WorldManager:
         p.start()
 
         self.agent_processes.append({"id": id, "process": p})
-
-        # Give process time to initialize and return id to caller
-        time.sleep(2)
         return id
 
-    def list_agents(self) -> List[Tuple]:
+    def list_agents(self) -> List[Tuple[uuid.UUID, str]]:
         return [(agent_id, agent_info['name']) for agent_id, agent_info in self.registry.items()]
 
 

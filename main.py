@@ -1,8 +1,8 @@
-import uuid
 import shlex
 import asyncio
+import uuid
 
-from world_manager import WorldManager
+from world import WorldManager
 
 
 async def interactive_mode(wm: WorldManager):
@@ -29,10 +29,10 @@ async def interactive_mode(wm: WorldManager):
             if not cmd:
                 continue
 
-            if cmd == "quit":
+            elif cmd == "quit":
                 break
 
-            if cmd == "exit":
+            elif cmd == "exit":
                 break
 
             elif cmd == "list":
@@ -96,9 +96,7 @@ async def interactive_mode(wm: WorldManager):
 async def main():
     # Create a new instance of the world manager
     wm = WorldManager()
-    wm.start_agent(
-        "My first agent", "gpt-4o-mini", "You are a helpful assistant"
-    )
+    wm.start_agent("My first agent", "gpt-4o-mini", "You are a helpful assistant")
 
     # Start listening for any messages sent from agents
     wm.start_user_queue_monitor()
