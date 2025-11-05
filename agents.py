@@ -1,12 +1,15 @@
 import asyncio
 import os
 import sys
+import json
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from multiprocessing import Queue
 from typing import Dict, Any, List
 from loguru import logger
+
+from tooling import tools, available_functions
 
 
 async def _agent(
@@ -55,21 +58,49 @@ async def _agent(
 
             agent_logger.info("Invoking LLM")
             response = await client.chat.completions.create(
-                model=model, messages=messages, temperature=0.7, max_tokens=500
+                model=model, messages=messages, temperature=0.7, max_tokens=500, tools=tools
             )
 
-            result = response.choices[0].message.content
+            response_message = response.choices[0].message
 
-            # Update conversation history
-            conversation_history.append({"role": "user", "content": user_message})
-            conversation_history.append({"role": "assistant", "content": result})
+            # Check to see if a tool call is needed
+            tool_calls = response_message.tool_calls
+            if tool_calls:
+                conversation_history.append(response_message.model_dump()) 
 
-            # Keep history manageable (last 10 messages)
-            if len(conversation_history) > 10:
-                conversation_history.pop(0)
-                conversation_history.pop(0)
+                for tool_call in tool_calls:
+                    agent_logger.info(f"Calling tool: {tool_call.function.name}")
+                    function_name = tool_call.function.name
+                    function_to_call = available_functions[function_name]
+                    function_args = json.loads(tool_call.function.arguments)
+                    
+                    function_response = function_to_call(
+                        location=function_args.get("location"),
+                        unit=function_args.get("unit", "fahrenheit"),
+                    )
 
-            return result
+                    conversation_history.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": function_response,
+                    })
+
+                    # Invoke to pass the control back to the LLM
+                    agent_logger.info("Invoking LLM")
+                    response = await client.chat.completions.create(
+                        model=model, messages=conversation_history
+                    )
+                    
+                    content = response.choices[0].message.content
+                    conversation_history.append({"role": "user", "content": user_message})
+                    conversation_history.append({"role": "assistant", "content": content})
+                    return content
+            else:            
+                content = response_message.content
+                conversation_history.append({"role": "user", "content": user_message})
+                conversation_history.append({"role": "assistant", "content": content})
+                return content
 
         except Exception as e:
             agent_logger.error(f"Error: {e}")
