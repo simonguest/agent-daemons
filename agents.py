@@ -11,6 +11,9 @@ from loguru import logger
 
 from tooling import tools, available_functions
 
+SYSTEM_PROMPT = """
+You are an AI agent, an autonomous entity... 
+"""
 
 async def _agent(
     id: str,
@@ -73,15 +76,21 @@ async def _agent(
                 for tool_call in tool_calls:
                     # Cast to proper tool call type to access function attribute
                     typed_tool_call = cast(ChatCompletionMessageToolCall, tool_call)
-                    agent_logger.info(f"Calling tool: {typed_tool_call.function.name}")
                     function_name = typed_tool_call.function.name
+                    agent_logger.info(f"Calling tool: {function_name}")
                     function_to_call = available_functions[function_name]
                     function_args = json.loads(typed_tool_call.function.arguments)
 
-                    function_response = function_to_call(
-                        location=function_args.get("location"),
-                        unit=function_args.get("unit", "fahrenheit"),
-                    )
+                    if function_name == "get_current_weather":
+                        function_response = function_to_call(
+                            location=function_args.get("location"),
+                            unit=function_args.get("unit", "fahrenheit"),
+                        )
+
+                    if function_name == "get_all_agents":
+                        function_response = function_to_call(
+                            registry = agent_registry
+                        )
 
                     conversation_history.append(
                         cast(
@@ -140,9 +149,9 @@ def agent(
     id: str,
     inbox: Queue,
     router_queue: Queue,
-    registry: Dict,
+    agent_registry: Dict,
     name: str,
     model: str,
     system_prompt: str,
 ):
-    asyncio.run(_agent(id, inbox, router_queue, registry, name, model, system_prompt))
+    asyncio.run(_agent(id, inbox, router_queue, agent_registry, name, model, system_prompt))

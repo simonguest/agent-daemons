@@ -1,5 +1,7 @@
-import json 
+import json
 
+from typing import Any
+from multiprocessing.managers import DictProxy
 from openai.types.chat import ChatCompletionToolParam
 
 tools: list[ChatCompletionToolParam] = [
@@ -18,14 +20,24 @@ tools: list[ChatCompletionToolParam] = [
                     "unit": {
                         "type": "string",
                         "enum": ["celsius", "fahrenheit"],
-                        "description": "The temperature unit to use"
+                        "description": "The temperature unit to use",
                     },
                 },
                 "required": ["location"],
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_all_agents",
+            "description": "Returns a list of AI agents that you can communicate with",
+            "parameters": {
+            },
+        },
+    },
 ]
+
 
 def get_current_weather(location, unit="fahrenheit"):
     """Get the current weather in a given location"""
@@ -37,6 +49,13 @@ def get_current_weather(location, unit="fahrenheit"):
     }
     return json.dumps(weather_data)
 
+
+def get_all_agents(registry: DictProxy[Any, Any]):
+    """Returns a list of the current agents that you can communicate with"""
+    return str(registry)
+
+
 available_functions = {
     "get_current_weather": get_current_weather,
+    "get_all_agents": get_all_agents
 }
