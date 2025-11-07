@@ -92,6 +92,13 @@ async def _agent(
                             registry = agent_registry
                         )
 
+                    if function_name == "send_message_to_user":
+                        function_response = function_to_call(
+                            router_queue = router_queue,
+                            id = id,
+                            content = function_args.get("content")
+                        )
+
                     conversation_history.append(
                         cast(
                             ChatCompletionMessageParam,
@@ -99,7 +106,7 @@ async def _agent(
                                 "tool_call_id": typed_tool_call.id,
                                 "role": "tool",
                                 "name": function_name,
-                                "content": function_response,
+                                "content": function_response or "None",
                             },
                         )
                     )
