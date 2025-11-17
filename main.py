@@ -155,8 +155,7 @@ async def interactive_mode(wm: WorldManager):
 async def main():
     # Create a new instance of the world manager
     wm = WorldManager()
-    wm.spawn_agent("My first agent", "gpt-4o-mini", "You are a helpful assistant")
-
+    
     # Start listening for any messages sent from agents
     wm.start_user_queue_monitor()
 

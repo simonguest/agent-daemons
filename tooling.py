@@ -49,7 +49,28 @@ tools: list[ChatCompletionToolParam] = [
                         "description": "The content of the message to send",
                     }
                 },
-                "required": ["location"],
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_message_to_agent",
+            "description": "Sends a message to another AI agent",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The id of the agent to send the message to",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content of the message to send",
+                    },
+                },
+                "required": ["id", "content"],
             },
         },
     },
@@ -72,11 +93,22 @@ def get_all_agents(registry: DictProxy[Any, Any]):
     return str(registry)
 
 
-def send_message_to_user(router_queue: Queue, id: str, content: str):
+def send_message_to_user(router_queue: Queue, from_id: str, content: str):
     """Sends a message to the human user"""
     message = {
-        "from": id,
+        "from": from_id,
         "to": "user",
+        "type": "chat",
+        "content": content,
+    }
+    router_queue.put(message)
+
+
+def send_message_to_agent(router_queue: Queue, from_id: str, to_id: str, content: str):
+    """Sends a message to an AI agent"""
+    message = {
+        "from": from_id,
+        "to": to_id,
         "type": "chat",
         "content": content,
     }
@@ -87,4 +119,5 @@ available_functions = {
     "get_current_weather": get_current_weather,
     "get_all_agents": get_all_agents,
     "send_message_to_user": send_message_to_user,
+    "send_message_to_agent": send_message_to_agent
 }

@@ -95,7 +95,15 @@ async def _agent(
                     if function_name == "send_message_to_user":
                         function_response = function_to_call(
                             router_queue = router_queue,
-                            id = id,
+                            from_id = id,
+                            content = function_args.get("content")
+                        )
+                    
+                    if function_name == "send_message_to_agent":
+                        function_response = function_to_call(
+                            router_queue = router_queue,
+                            from_id = id,
+                            to_id = function_args.get("id"),
                             content = function_args.get("content")
                         )
 
