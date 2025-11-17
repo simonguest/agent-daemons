@@ -26,8 +26,8 @@ class AgentCompleter(Completer):
                 if cmd.startswith(word.lower()):
                     yield Completion(cmd, start_position=-len(word))
 
-        # If we typed "send " or "kill ", suggest agent IDs
-        elif len(words) >= 1 and words[0] in ('send', 'kill'):
+        # If we typed "ping ", "send ", or "kill ", suggest agent IDs
+        elif len(words) >= 1 and words[0] in ('ping', 'send', 'conversation', 'kill'):
             if len(words) == 1 or (len(words) == 2 and not text.endswith(' ')):
                 # We're completing the agent ID
                 current_word = words[1] if len(words) == 2 else ''
@@ -45,12 +45,14 @@ class AgentCompleter(Completer):
 
 def print_help():
     print("\nAvailable commands:")
-    print("  list                          - List all running agents")
-    print("  spawn <name> <model> <prompt> - Spawn new agent with name, model, and prompt")
-    print("  send <id> <message>           - Send a message to an agent based on id")
-    print("  kill <id>                     - Kill agent")
-    print("  help                          - Show this help message")
-    print("  quit/exit                     - Quit")
+    print("  list                                   - List all running agents")
+    print("  spawn <name> <model> <instructions>    - Spawn new agent with name, model, and instructions")
+    print("  ping <id>                              - Ping the agent")
+    print("  send <id> <message>                    - Send a message to an agent based on id")
+    print("  conversation <id>                      - Reveal the conversation history for the agent")
+    print("  kill <id>                              - Kill agent")
+    print("  help                                   - Show this help message")
+    print("  quit/exit                              - Quit")
     print()
 
 
@@ -101,16 +103,47 @@ async def interactive_mode(wm: WorldManager):
                     if len(args) >= 3:
                         name = args[0]
                         model = args[1]
-                        prompt = args[2]
-                        agent_id = wm.spawn_agent(name, model, prompt)
+                        instructions = args[2]
+                        agent_id = wm.spawn_agent(name, model, instructions)
                         print(f"Spawned agent: {name} (ID: {agent_id})")
                     else:
-                        print("Usage: spawn <name> <model> <prompt>")
+                        print("Usage: spawn <name> <model> <instructions>")
                         print("Example: spawn 'Travel Agent' gpt-4o-mini 'You help people book travel'")
                 except ValueError as e:
                     print(f"Error parsing command: {e}")
-                    print("Usage: spawn <name> <model> <prompt>")
+                    print("Usage: spawn <name> <model> <instructions>")
                     print("Example: spawn 'Travel Agent' gpt-4o-mini 'You help people book travel'")
+
+            elif cmd.startswith("ping "):
+                parts = cmd.split(" ", 1)[1]
+                try:
+                    args = shlex.split(parts)
+                    if len(args) >= 1:
+                        agent_id = uuid.UUID(args[0])
+                        wm.ping_agent(agent_id)
+                        print(f"Pinged agent {agent_id}")
+                    else:
+                        print("Usage: ping <id>")
+                        print("Example: ping 12345678-1234-5678-1234-567812345678")
+                except ValueError as e:
+                    print(f"Error parsing command: {e}")
+                    print("Usage: ping <id>")
+                    print("Example: ping 12345678-1234-5678-1234-567812345678")               
+
+            elif cmd.startswith("conversation "):
+                parts = cmd.split(" ", 1)[1]
+                try:
+                    args = shlex.split(parts)
+                    if len(args) >= 1:
+                        agent_id = uuid.UUID(args[0])
+                        wm.request_conversation_history(agent_id)
+                    else:
+                        print("Usage: conversation <id>")
+                        print("Example: conversation 12345678-1234-5678-1234-567812345678")
+                except ValueError as e:
+                    print(f"Error parsing command: {e}")
+                    print("Usage: conversation <id>")
+                    print("Example: conversation 12345678-1234-5678-1234-567812345678")        
 
             elif cmd.startswith("send "):
                 parts = cmd.split(" ", 1)[1]

@@ -55,7 +55,7 @@ class WorldManager:
         # Return False to propagate any exceptions that occurred
         return False
 
-    def spawn_agent(self, name: str, model: str, system_prompt: str):
+    def spawn_agent(self, name: str, model: str, instructions: str):
         id = uuid.uuid4()
         inbox = self.manager.Queue()
 
@@ -70,7 +70,7 @@ class WorldManager:
                 self.registry,
                 name,
                 model,
-                system_prompt,
+                instructions,
             ),
             daemon=True,
         )
@@ -81,6 +81,14 @@ class WorldManager:
 
     def list_agents(self) -> List[Tuple[uuid.UUID, str]]:
         return [(agent_id, agent_info['name']) for agent_id, agent_info in self.registry.items()]
+
+    def ping_agent(self, id: uuid.UUID) -> None:
+        ping = {"from": "user", "to": id, "type": "ping"}
+        self.msg_router_queue.put(ping)
+
+    def request_conversation_history(self, id: uuid.UUID) -> None:
+        request = {"from": "user", "to": id, "type": "conversation_history"}
+        self.msg_router_queue.put(request)
 
 
     def send_message_to_agent(self, id: uuid.UUID, message: str) -> None:
