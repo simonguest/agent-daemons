@@ -13,9 +13,32 @@ from loguru import logger
 from tooling import tools, available_functions
 
 SYSTEM_PROMPT = """
-You are an AI agent, an autonomous entity... 
+You are a helpful AI Agent.
+
+Your goal is to handle incoming requests, create a plan for how to complete them (if they are complex), and communicate accordingly.
+
+You have access to a set of tools:
+
+get_all_agents: This lets you see other agents who you can communicate with.
+send_message_to_agent: This lets you send a message to another agent.
+send_message_to_user: This lets you send a message to the user (a human)
+
+Note: The list of agents is dynamic and can change frequently. You should always call get_all_agents before send_message_to_agent.
+
+If you want to send a message back to the agent/use, you must use the send_message_to_agent or send_message_to_user tools. Just adding a reply to the conversation thread isn't enough.
+
+When you send a message to an agent or the user, you'll pause working on your task. If the agent/user sends a follow up message, your task will continue.
+
+You will continue to work on your task until you send a message.
+
+If you received a message from an agent, you should reply back to the agent (using send_message_to_agent) vs. communicating directly with the user (using send_message_to_user).
+
+Here are additional instructions that you should follow:
+
+
 """
 
+MAX_THINKING_TURNS = 10 # The maximum number of turns that can be taken before sending a message to prevent inf. loops
 
 async def _agent(
     id: str,
@@ -38,9 +61,6 @@ async def _agent(
 
     # Initialize OpenAI client
     client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
-
-    # Set the System prompt
-    SYSTEM_PROMPT = "You are a helpful agent."
 
     # Register this agent with its capabilities
     agent_registry[id] = {
@@ -76,15 +96,20 @@ async def _agent(
             ]
         conversations[id].append(message)
 
-    async def invoke_llm(message: Dict[str, Any]):
+    async def invoke_llm(conversation_id: str, content: str):
+        agent_logger.info("Invoking LLM")
         try:
-            # Add the incoming message to the conversation thread
-            update_conversation(message["from"], {"role": "user", "content": message["content"]})
+            task_wip = True # Agent is still working on the task
 
-            agent_logger.info("Invoking LLM")
+            # Add the incoming message to the conversation thread
+            if content != "":
+                update_conversation(
+                    conversation_id, {"role": "user", "content": content}
+                )
+
             response = await client.chat.completions.create(
                 model=model,
-                messages=get_conversation(message["from"]),
+                messages=get_conversation(conversation_id),
                 temperature=0.7,
                 max_tokens=500,
                 tools=tools,
@@ -96,8 +121,13 @@ async def _agent(
             tool_calls = response_message.tool_calls
             if tool_calls:
                 # Append user message and assistant response with tool calls
-                update_conversation(message["from"], {"role": "user", "content": message["content"]})
-                update_conversation(message["from"], cast(ChatCompletionMessageParam, response_message.model_dump()))
+                update_conversation(
+                    conversation_id, {"role": "user", "content": content}
+                )
+                update_conversation(
+                    conversation_id,
+                    cast(ChatCompletionMessageParam, response_message.model_dump()),
+                )
 
                 for tool_call in tool_calls:
                     # Cast to proper tool call type to access function attribute
@@ -122,6 +152,7 @@ async def _agent(
                             from_id=id,
                             content=function_args.get("content"),
                         )
+                        task_wip = False # Task completed, waiting on user
 
                     if function_name == "send_message_to_agent":
                         function_response = function_to_call(
@@ -130,8 +161,11 @@ async def _agent(
                             to_id=function_args.get("id"),
                             content=function_args.get("content"),
                         )
+                        task_wip = False # Task completed, waiting on agent
 
-                    update_conversation(message["from"], cast(
+                    update_conversation(
+                        conversation_id,
+                        cast(
                             ChatCompletionMessageParam,
                             {
                                 "tool_call_id": typed_tool_call.id,
@@ -139,21 +173,31 @@ async def _agent(
                                 "name": function_name,
                                 "content": function_response or "None",
                             },
-                        ))
-
-                    # Invoke to pass the control back to the LLM
-                    agent_logger.info("Invoking LLM")
-                    response = await client.chat.completions.create(
-                        model=model, messages=get_conversation(message["from"])
+                        ),
                     )
 
-                    content = response.choices[0].message.content
-                    update_conversation(message["from"], {"role": "assistant", "content": content})
-                    return content
+                    if task_wip:
+                        # Add tool call response back to the conversation thread
+                        response = await client.chat.completions.create(
+                            model=model, messages=get_conversation(conversation_id)
+                        )
+                        response = response.choices[0].message.content
+                        update_conversation(
+                            conversation_id, {"role": "assistant", "content": response}
+                        )
+
+                        # Recursive call to continue the task
+                        await invoke_llm(conversation_id, "")
             else:
-                content = response_message.content
-                update_conversation(message["from"], {"role": "assistant", "content": content})
-                return content
+                if task_wip:
+                    # The agent is thinking to itself - add to the conversation thread
+                    response = response_message.content
+                    update_conversation(
+                        conversation_id, {"role": "assistant", "content": response}
+                    )
+
+                    # Recursive call to continue the task
+                    await invoke_llm(conversation_id, "")
 
         except Exception as e:
             agent_logger.error(f"Error: {e}")
@@ -171,27 +215,24 @@ async def _agent(
                 "content": f"Ack at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             }
             router_queue.put(ack)
-        elif message["type"] == "conversation_history": # Request for the conversation history
-            agent_logger.info(f"Received request for conversation history from {message["from"]}")
+        elif (
+            message["type"] == "conversation_history"
+        ):  # Request for the conversation history
+            agent_logger.info(
+                f"Received request for conversation history from {message['from']}"
+            )
             # Create response
             response = {
                 "from": id,
                 "to": message["from"],
                 "type": "chat",
-                "content": get_conversation(message["from"])
+                "content": get_conversation(message["from"]),
             }
             router_queue.put(response)
         elif message["type"] == "chat":  # A chat message for the agent
             agent_logger.info(f"Chat message received from {message['from']}")
-            response = await invoke_llm(message)
-            agent_logger.info(f"Returning response to {message['from']}")
-            message = {
-                "from": id,
-                "to": message["from"],
-                "type": "chat",
-                "content": response,
-            }
-            router_queue.put(message)
+            response = await invoke_llm(message["from"], message["content"])
+
 
     agent_logger.info("Entering main loop")
     while True:
