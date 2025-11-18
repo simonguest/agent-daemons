@@ -38,7 +38,8 @@ Here are additional instructions that you should follow:
 
 """
 
-MAX_THINKING_TURNS = 10 # The maximum number of turns that can be taken before sending a message to prevent inf. loops
+MAX_THINKING_TURNS = 10  # The maximum number of turns that can be taken before sending a message to prevent inf. loops
+
 
 async def _agent(
     id: str,
@@ -99,7 +100,7 @@ async def _agent(
     async def invoke_llm(conversation_id: str, content: str):
         agent_logger.info("Invoking LLM")
         try:
-            task_wip = True # Agent is still working on the task
+            task_wip = True  # Agent is still working on the task
 
             # Add the incoming message to the conversation thread
             if content != "":
@@ -152,7 +153,7 @@ async def _agent(
                             from_id=id,
                             content=function_args.get("content"),
                         )
-                        task_wip = False # Task completed, waiting on user
+                        task_wip = False  # Task completed, waiting on user
 
                     if function_name == "send_message_to_agent":
                         function_response = function_to_call(
@@ -161,7 +162,7 @@ async def _agent(
                             to_id=function_args.get("id"),
                             content=function_args.get("content"),
                         )
-                        task_wip = False # Task completed, waiting on agent
+                        task_wip = False  # Task completed, waiting on agent
 
                     update_conversation(
                         conversation_id,
@@ -230,9 +231,10 @@ async def _agent(
             }
             router_queue.put(response)
         elif message["type"] == "chat":  # A chat message for the agent
-            agent_logger.info(f"Chat message received from {message['from']}")
+            agent_logger.info(
+                f"Chat message received from {message['from']}: {message['content']}"
+            )
             response = await invoke_llm(message["from"], message["content"])
-
 
     agent_logger.info("Entering main loop")
     while True:
