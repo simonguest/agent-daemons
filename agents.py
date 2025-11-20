@@ -13,28 +13,25 @@ from loguru import logger
 from tooling import tools, available_functions
 
 SYSTEM_PROMPT = """
-You are a helpful AI Agent.
+You are a helpful AI Agent operating in a world with many other entities. These other entites can be other AI agents or humans.
 
-Your goal is to handle incoming requests, create a plan for how to complete them (if they are complex), and communicate accordingly.
+Your goal is to handle incoming requests from other entites, complete them, and communicate accordingly.
 
 You have access to a set of tools:
 
-get_all_agents: This lets you see other agents who you can communicate with.
-send_message_to_agent: This lets you send a message to another agent.
-send_message_to_user: This lets you send a message to the user (a human)
+**get_entities**: This lets you see other entities who you can communicate with.
 
-Note: The list of agents is dynamic and can change frequently. You should always call get_all_agents before send_message_to_agent.
+Entities can be humans or other AI agents, similar to yourself. Every entity has a unique ID for communication.
 
-If you want to send a message back to the agent/use, you must use the send_message_to_agent or send_message_to_user tools. Just adding a reply to the conversation thread isn't enough.
+**send_message**: This lets you send a message to another entity.
 
-When you send a message to an agent or the user, you'll pause working on your task. If the agent/user sends a follow up message, your task will continue.
+Note: The list of entities in the world is dynamic and can change frequently. You should always call get_all_entities before sending a message.
+
+When you send a message to an entity, you'll pause working on your task. If the entity sends a follow up message, your task will continue.
 
 You will continue to work on your task until you send a message.
 
-If you received a message from an agent, you should reply back to the agent (using send_message_to_agent) vs. communicating directly with the user (using send_message_to_user).
-
 Here are additional instructions that you should follow:
-
 
 """
 
@@ -55,9 +52,9 @@ async def _agent(
     logger.add(
         sys.stdout,
         colorize=True,
-        format="<blue>Agent {extra[id]}</blue> | <level>{message}</level>",
+        format="<blue>Agent {extra[name]} ({extra[id]})</blue> | <level>{message}</level>",
     )
-    agent_logger = logger.bind(id=id)
+    agent_logger = logger.bind(name=name, id=id)
     agent_logger.info(f"Starting up with model: {model}")
 
     # Initialize OpenAI client
@@ -97,15 +94,20 @@ async def _agent(
             ]
         conversations[id].append(message)
 
-    async def invoke_llm(conversation_id: str, content: str):
-        agent_logger.info("Invoking LLM")
+    async def invoke_llm(thinking_turn: int, conversation_id: str, content: str):
+        agent_logger.info(f"Thinking... {thinking_turn}")
+        if thinking_turn > MAX_THINKING_TURNS:
+            agent_logger.info("Reached max number of thinking turns. Giving up.")
+            return
+        
         try:
             task_wip = True  # Agent is still working on the task
 
             # Add the incoming message to the conversation thread
             if content != "":
+                content_template = f"You have recieved a message from entity: {conversation_id}. The message is {content}"
                 update_conversation(
-                    conversation_id, {"role": "user", "content": content}
+                    conversation_id, {"role": "user", "content": content_template}
                 )
 
             response = await client.chat.completions.create(
@@ -130,6 +132,8 @@ async def _agent(
                     cast(ChatCompletionMessageParam, response_message.model_dump()),
                 )
 
+                tool_called = False
+
                 for tool_call in tool_calls:
                     # Cast to proper tool call type to access function attribute
                     typed_tool_call = cast(ChatCompletionMessageToolCall, tool_call)
@@ -143,41 +147,35 @@ async def _agent(
                             location=function_args.get("location"),
                             unit=function_args.get("unit", "fahrenheit"),
                         )
+                        tool_called = True
 
-                    if function_name == "get_all_agents":
+                    if function_name == "get_entities":
                         function_response = function_to_call(registry=agent_registry)
+                        tool_called = True
 
-                    if function_name == "send_message_to_user":
-                        function_response = function_to_call(
-                            router_queue=router_queue,
-                            from_id=id,
-                            content=function_args.get("content"),
-                        )
-                        task_wip = False  # Task completed, waiting on user
-
-                    if function_name == "send_message_to_agent":
+                    if function_name == "send_message":
                         function_response = function_to_call(
                             router_queue=router_queue,
                             from_id=id,
                             to_id=function_args.get("id"),
                             content=function_args.get("content"),
                         )
+                        tool_called = True
                         task_wip = False  # Task completed, waiting on agent
 
-                    update_conversation(
-                        conversation_id,
-                        cast(
-                            ChatCompletionMessageParam,
-                            {
-                                "tool_call_id": typed_tool_call.id,
-                                "role": "tool",
-                                "name": function_name,
-                                "content": function_response or "None",
-                            },
-                        ),
-                    )
-
-                    if task_wip:
+                    if tool_called:
+                        update_conversation(
+                            conversation_id,
+                            cast(
+                                ChatCompletionMessageParam,
+                                {
+                                    "tool_call_id": typed_tool_call.id,
+                                    "role": "tool",
+                                    "name": function_name,
+                                    "content": function_response or "None",
+                                },
+                            ),
+                        )
                         # Add tool call response back to the conversation thread
                         response = await client.chat.completions.create(
                             model=model, messages=get_conversation(conversation_id)
@@ -187,8 +185,15 @@ async def _agent(
                             conversation_id, {"role": "assistant", "content": response}
                         )
 
-                        # Recursive call to continue the task
-                        await invoke_llm(conversation_id, "")
+                        if task_wip:
+                            # Recursive call to continue the task
+                            await invoke_llm(thinking_turn+1, conversation_id, "")
+                    else:
+                        agent_logger.info(f"No tool available: {function_name}")
+                        update_conversation(
+                            conversation_id, {"role": "assistant", "content": f"I tried to call a tool called {function_name}, but it was not available"}
+                        )
+                        await invoke_llm(thinking_turn+1, conversation_id, "")
             else:
                 if task_wip:
                     # The agent is thinking to itself - add to the conversation thread
@@ -198,7 +203,7 @@ async def _agent(
                     )
 
                     # Recursive call to continue the task
-                    await invoke_llm(conversation_id, "")
+                    await invoke_llm(thinking_turn+1, conversation_id, "")
 
         except Exception as e:
             agent_logger.error(f"Error: {e}")
@@ -234,7 +239,7 @@ async def _agent(
             agent_logger.info(
                 f"Chat message received from {message['from']}: {message['content']}"
             )
-            response = await invoke_llm(message["from"], message["content"])
+            response = await invoke_llm(1, message["from"], message["content"])
 
     agent_logger.info("Entering main loop")
     while True:

@@ -10,8 +10,8 @@ from agents import agent
 from router import MessageRouter
 
 
-def _run_message_router(registry, router_queue, agent_queues, user_queue):
-    router = MessageRouter(registry, router_queue, agent_queues, user_queue)
+def _run_message_router(registry, router_queue, agent_queues):
+    router = MessageRouter(registry, router_queue, agent_queues)
     asyncio.run(router.run())
 
 
@@ -31,9 +31,8 @@ class WorldManager:
         self.registry = self.manager.dict()
         self.msg_router_queue = self.manager.Queue()
         self.agent_queues = self.manager.dict()
-        self.user_queue = self.manager.Queue()  # Queue for user messages
         self.agent_processes = []  # Instance variable, not class variable
-
+    
         # Start message router in separate process
         self.router_process = Process(
             target=_run_message_router,
@@ -41,11 +40,18 @@ class WorldManager:
                 self.registry,
                 self.msg_router_queue,
                 self.agent_queues,
-                self.user_queue,
             ),
             daemon=True,
         )
         self.router_process.start()
+
+        # Set the ID of the human interacting with this world and add them to the registry, create them a queue also
+        self.user_id = uuid.uuid4()
+        self.registry[self.user_id] = {
+            "type": "human",
+            "name": "Human"
+        }
+        self.agent_queues[self.user_id] = self.manager.Queue()
 
     def __enter__(self):
         return self
@@ -83,16 +89,16 @@ class WorldManager:
         return [(agent_id, agent_info['name']) for agent_id, agent_info in self.registry.items()]
 
     def ping_agent(self, id: uuid.UUID) -> None:
-        ping = {"from": "user", "to": id, "type": "ping"}
+        ping = {"from": self.user_id, "to": id, "type": "ping"}
         self.msg_router_queue.put(ping)
 
     def request_conversation_history(self, id: uuid.UUID) -> None:
-        request = {"from": "user", "to": id, "type": "conversation_history"}
+        request = {"from": self.user_id, "to": id, "type": "conversation_history"}
         self.msg_router_queue.put(request)
 
 
     def send_message_to_agent(self, id: uuid.UUID, message: str) -> None:
-        new_message = {"from": "user", "to": id, "type": "chat", "content": message}
+        new_message = {"from": self.user_id, "to": id, "type": "chat", "content": message}
         self.msg_router_queue.put(new_message)
 
     async def monitor_user_queue(self) -> None:
@@ -104,8 +110,8 @@ class WorldManager:
         )
         user_logger = logger.bind(name="user")
         while True:
-            if not self.user_queue.empty():
-                message = self.user_queue.get()
+            if not self.agent_queues[self.user_id].empty():
+                message = self.agent_queues[self.user_id].get()
                 content = message.get("content", "")
                 sender = message.get("from", "unknown")
                 user_logger.info(f"Message from {sender}: {content}")
